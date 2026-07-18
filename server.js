@@ -14,6 +14,7 @@ const upload = multer({ dest: 'uploads/' });
 
 // Make sure output folder exists
 if (!fs.existsSync('output')) fs.mkdirSync('output');
+if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
 
 // ---- ROUTE 1: Encrypt message + hide it in uploaded image ----
 app.post('/encrypt-embed', upload.single('image'), async (req, res) => {
@@ -84,7 +85,7 @@ app.post('/image-capacity', upload.single('image'), async (req, res) => {
     }
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
