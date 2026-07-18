@@ -10,7 +10,18 @@ app.use(cors());
 app.use(express.json());
 
 // Store uploaded files temporarily in an "uploads" folder
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({
+    dest: 'uploads/',
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = ['image/png', 'image/jpeg', 'image/bmp'];
+        if (allowedTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Unsupported file type. Please upload a PNG, JPG, or BMP image.'));
+        }
+    },
+    limits: { fileSize: 10 * 1024 * 1024 }
+});
 
 // Make sure output folder exists
 if (!fs.existsSync('output')) fs.mkdirSync('output');
@@ -84,6 +95,11 @@ app.post('/image-capacity', upload.single('image'), async (req, res) => {
         res.status(500).json({ error: 'Could not read image.' });
     }
 });
+
+app.use((err, req, res, next) => {
+    res.status(400).json({ error: err.message || 'Upload failed.' });
+});
+
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

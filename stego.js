@@ -60,7 +60,12 @@ function bitsToBuffer(bits) {
 
 // ---- EMBED PAYLOAD INTO IMAGE ----
 async function embedInImage(imagePath, payload, outputPath) {
-    const image = await Jimp.read(imagePath);
+    let image;
+    try {
+        image = await Jimp.read(imagePath);
+    } catch (err) {
+        throw new Error('The uploaded image could not be read. Please try uploading again.');
+    }
 
     // Prefix the payload with its own length (32 bits = 4 bytes)
     // so during extraction we know exactly how many bits to read back

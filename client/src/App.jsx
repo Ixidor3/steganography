@@ -122,7 +122,7 @@ function HideForm() {
         Cover Image
         <input
           type="file"
-          accept="image/png"
+          accept="image/png,image/jpeg,image/bmp"
           onChange={handleImageChange}
         />
       </label>
@@ -226,7 +226,7 @@ function RevealForm() {
         Stego Image
         <input
           type="file"
-          accept="image/png"
+          accept="image/png,image/jpeg,image/bmp"
           onChange={(e) => setImage(e.target.files[0])}
         />
       </label>
