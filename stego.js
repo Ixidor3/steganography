@@ -67,60 +67,75 @@ async function embedInImage(imagePath, payload, outputPath) {
         throw new Error('The uploaded image could not be read. Please try uploading again.');
     }
 
-    // Prefix the payload with its own length (32 bits = 4 bytes)
-    // so during extraction we know exactly how many bits to read back
-    const lengthBits = payload.length.toString(2).padStart(32, '0');
-    const payloadBits = bufferToBits(payload);
-    const allBits = lengthBits + payloadBits;
+    const { width, height, data } = image.bitmap;
+    const capacityBits = width * height * 3;
+    const totalBitsNeeded = 32 + payload.length * 8;
 
-    // Capacity check: each pixel gives us 3 usable bits (R,G,B)
-    const capacityBits = image.bitmap.width * image.bitmap.height * 3;
-    if (allBits.length > capacityBits) {
+    if (totalBitsNeeded > capacityBits) {
         throw new Error("Image too small to hold this payload");
     }
 
-    let bitIndex = 0;
-    image.scan(0, 0, image.bitmap.width, image.bitmap.height, function (x, y, idx) {
-        if (bitIndex >= allBits.length) return;
+    // Build a small header buffer (4 bytes) encoding the payload length
+    const lengthHeader = Buffer.alloc(4);
+    lengthHeader.writeUInt32BE(payload.length, 0);
 
-        // idx points to the Red byte; idx+1 = Green, idx+2 = Blue, idx+3 = Alpha
-        for (let channel = 0; channel < 3; channel++) {
-            if (bitIndex >= allBits.length) return;
-            const bit = parseInt(allBits[bitIndex]);
-            // Clear the last bit, then set it to our bit
-            this.bitmap.data[idx + channel] = (this.bitmap.data[idx + channel] & 0xFE) | bit;
+    // Helper: get the bit at a given index across [lengthHeader + payload] without
+    // ever building a giant string - reads directly from the two buffers
+    function getPayloadBit(bitIndex) {
+        const byteIndex = Math.floor(bitIndex / 8);
+        const bitOffset = 7 - (bitIndex % 8); // MSB-first, matches original string-based order
+        const sourceByte = byteIndex < 4
+            ? lengthHeader[byteIndex]
+            : payload[byteIndex - 4];
+        return (sourceByte >> bitOffset) & 1;
+    }
+
+    let bitIndex = 0;
+    for (let pixelIndex = 0; pixelIndex < width * height && bitIndex < totalBitsNeeded; pixelIndex++) {
+        const idx = pixelIndex * 4; // Jimp stores RGBA, 4 bytes per pixel
+        for (let channel = 0; channel < 3 && bitIndex < totalBitsNeeded; channel++) {
+            const bit = getPayloadBit(bitIndex);
+            data[idx + channel] = (data[idx + channel] & 0xFE) | bit;
             bitIndex++;
         }
-    });
+    }
 
     await image.writeAsync(outputPath);
-    console.log("Stego image saved:", outputPath);
 }
 
 // ---- EXTRACT PAYLOAD FROM IMAGE ----
 async function extractFromImage(imagePath) {
     const image = await Jimp.read(imagePath);
+    const { width, height, data } = image.bitmap;
 
-    let bits = '';
+    // Read only the first 32 bits to get payload length, without scanning the whole image
     let lengthBits = '';
-    let payloadLength = null;
-    let payloadBits = '';
+    let pixelsRead = 0;
+    const totalPixels = width * height;
 
-    image.scan(0, 0, image.bitmap.width, image.bitmap.height, function (x, y, idx) {
-        for (let channel = 0; channel < 3; channel++) {
-            const bit = this.bitmap.data[idx + channel] & 1; // read last bit
-            bits += bit;
+    function getBitAt(bitIndex) {
+        const pixelIndex = Math.floor(bitIndex / 3);
+        const channel = bitIndex % 3;
+        const idx = pixelIndex * 4; // Jimp stores RGBA, 4 bytes per pixel
+        return data[idx + channel] & 1;
+    }
+
+    for (let i = 0; i < 32; i++) lengthBits += getBitAt(i);
+    const payloadLength = parseInt(lengthBits, 2);
+    const totalBitsNeeded = 32 + payloadLength * 8;
+
+    // Now extract only the exact number of bits needed, into a byte buffer directly
+    const outputBytes = Buffer.alloc(payloadLength);
+    for (let byteIndex = 0; byteIndex < payloadLength; byteIndex++) {
+        let byte = 0;
+        for (let bit = 0; bit < 8; bit++) {
+            const bitIndex = 32 + byteIndex * 8 + bit;
+            byte = (byte << 1) | getBitAt(bitIndex);
         }
-    });
+        outputBytes[byteIndex] = byte;
+    }
 
-    // First 32 bits = payload length
-    lengthBits = bits.substring(0, 32);
-    payloadLength = parseInt(lengthBits, 2);
-
-    // Next (payloadLength * 8) bits = actual payload
-    payloadBits = bits.substring(32, 32 + payloadLength * 8);
-
-    return bitsToBuffer(payloadBits);
+    return outputBytes;
 }
 
 // ---- CALCULATE HOW MANY BYTES AN IMAGE CAN HOLD ----
